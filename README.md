@@ -69,6 +69,22 @@ python3 broker_mass_configure.py \
   --debug
 ```
 
+### Remove a Connection Across All Orgs in a Group
+
+Remove a specific broker connection from all organizations in a group (supports dry run). `--source-org-id` is not required for removal:
+
+```bash
+python3 broker_mass_configure.py \
+  --snyk-token $SNYK_TOKEN \
+  --tenant-id $TENANT_ID \
+  --group-id $GROUP_ID \
+  --remove-connection <CONNECTION_ID> \
+  --dry-run  # optional
+```
+
+Notes:
+- `--dry-run` will only report what would be removed without deleting anything.
+
 ## Arguments
 
 - `--snyk-token`: Your Snyk API token (required)

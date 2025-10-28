@@ -201,3 +201,6 @@ broker_config.log
 .env
 secrets.json
 config.json
+
+# Snyk Security Extension - AI Rules (auto-generated)
+.cursor/rules/snyk_rules.mdc

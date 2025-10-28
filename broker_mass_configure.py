@@ -30,13 +30,18 @@ def main():
     parser.add_argument('--snyk-token', required=True, help='Snyk API token')
     parser.add_argument('--tenant-id', required=True, help='Snyk tenant ID')
     parser.add_argument('--group-id', required=True, help='Snyk group ID')
-    parser.add_argument('--source-org-id', required=True, help='Source organization ID with broker connection')
+    parser.add_argument('--source-org-id', required=False, help='Source organization ID with broker connection (required for configuration)')
     parser.add_argument('--broker-connection-id', help='Specific broker connection ID to use (optional)')
+    parser.add_argument('--remove-connection', help='Remove this broker connection ID from all orgs in the group')
     parser.add_argument('--dry-run', action='store_true', help='Perform a dry run without making changes')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     
     args = parser.parse_args()
     
+    # Validate mode-specific requirements
+    if not args.remove_connection and not args.source_org_id:
+        parser.error('--source-org-id is required unless --remove-connection is provided')
+
     # Initialize Snyk API client
     snyk = SnykAPI(
         token=args.snyk_token,
@@ -50,6 +55,38 @@ def main():
     print("=" * 50)
     
     try:
+        # If removal mode is requested, run it and exit
+        if args.remove_connection:
+            print(f"\n🗑️  Removal mode: connection {args.remove_connection} across group {args.group_id}")
+            if args.dry_run:
+                print("🧪 DRY RUN ENABLED: No changes will be made")
+            results = snyk.remove_connection_from_all_orgs(
+                connection_id=args.remove_connection,
+                group_id=args.group_id,
+                dry_run=args.dry_run,
+            )
+            print("\n📊 Removal Results:")
+            print(f"  ✅ Success: {len(results['success'])}")
+            print(f"  ❌ Failed: {len(results['failed'])}")
+            print(f"  🔎 Not Found: {len(results['not_found'])}")
+            if results['success']:
+                print("\n✅ Orgs updated:")
+                for r in results['success']:
+                    if results.get('dry_run'):
+                        print(f"  - {r['org_name']} ({r['org_id']}): would remove {r['integrations_to_remove']} integration(s)")
+                    else:
+                        print(f"  - {r['org_name']} ({r['org_id']}): removed {r['integrations_removed']} integration(s)")
+            if results['failed']:
+                print("\n❌ Failed removals:")
+                for r in results['failed']:
+                    print(f"  - {r['org_name']} ({r['org_id']}): {r['reason']}")
+            if results['not_found']:
+                print("\n🔎 Connection not found in:")
+                for r in results['not_found']:
+                    print(f"  - {r['org_name']} ({r['org_id']})")
+            print("\n✅ Removal process completed!")
+            return
+
         # Step 1: Get all organizations in the group
         print(f"\n📋 Step 1: Fetching organizations for group {args.group_id}...")
         all_orgs = snyk.get_organizations_for_group()

@@ -1019,3 +1019,122 @@ class SnykAPI:
         except Exception as e:
             self._debug_log(f"Error configuring broker for org {org_id}: {str(e)}")
             return False
+    
+    def remove_connection_from_all_orgs(self, connection_id: str, group_id: str = None, dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Remove a specific broker connection from all organizations in a group.
+        
+        This method:
+        1. Fetches all organizations in the specified group
+        2. For each org, checks if it has the specified connection
+        3. If found, removes the connection from that org (or simulates if dry_run=True)
+        
+        Args:
+            connection_id: The broker connection ID to remove
+            group_id: Group ID to search within. If None, uses self.group_id
+            dry_run: If True, only logs what would be removed without making changes
+            
+        Returns:
+            Dictionary with results showing which orgs had the connection removed
+        """
+        if group_id is None:
+            group_id = self.group_id
+            
+        if not group_id:
+            raise ValueError("Group ID must be provided either as parameter or in constructor")
+        
+        if not self.tenant_id:
+            raise ValueError("Tenant ID must be provided in constructor")
+        
+        results = {
+            'success': [],
+            'not_found': [],
+            'failed': [],
+            'dry_run': dry_run
+        }
+        
+        self._debug_log(f"Starting removal of connection {connection_id} from all orgs in group {group_id} (dry_run={dry_run})")
+        
+        # Get all organizations in the group
+        all_orgs = self.get_organizations_for_group(group_id)
+        
+        if not all_orgs:
+            self._debug_log(f"No organizations found in group {group_id}")
+            return results
+        
+        self._debug_log(f"Found {len(all_orgs)} organizations in group. Checking for connection {connection_id}")
+        
+        # Check which orgs have this connection
+        integrations = self.get_broker_integrations_for_connection(connection_id)
+        
+        if not integrations:
+            self._debug_log(f"No integrations found for connection {connection_id} in any organization")
+            return results
+        
+        # Track which orgs have this connection
+        orgs_with_connection = {}
+        for integration in integrations:
+            if integration.org_id in orgs_with_connection:
+                orgs_with_connection[integration.org_id].append(integration)
+            else:
+                orgs_with_connection[integration.org_id] = [integration]
+        
+        self._debug_log(f"Found connection in {len(orgs_with_connection)} organizations")
+        
+        # Remove connection from each org that has it
+        for org in all_orgs:
+            if org.id in orgs_with_connection:
+                self._debug_log(f"Removing connection {connection_id} from org {org.name} ({org.id})")
+                
+                try:
+                    # Remove each integration for this org
+                    org_integrations = orgs_with_connection[org.id]
+                    all_removed = True
+                    
+                    for integration in org_integrations:
+                        if dry_run:
+                            self._debug_log(f"[DRY RUN] Would remove integration {integration.id} from org {org.id}")
+                            success = True
+                        else:
+                            success = self.delete_broker_integration(connection_id, org.id, integration.id)
+                        if not success:
+                            all_removed = False
+                            self._debug_log(f"Failed to remove integration {integration.id} from org {org.id}")
+                    
+                    if all_removed:
+                        results['success'].append({
+                            'org_id': org.id,
+                            'org_name': org.name,
+                            'connection_id': connection_id,
+                            'integrations_removed': 0 if dry_run else len(org_integrations),
+                            'integrations_to_remove': len(org_integrations) if dry_run else 0
+                        })
+                        self._debug_log(
+                            f"{'[DRY RUN] Would remove' if dry_run else 'Successfully removed'} connection from org {org.name}"
+                        )
+                    else:
+                        results['failed'].append({
+                            'org_id': org.id,
+                            'org_name': org.name,
+                            'connection_id': connection_id,
+                            'reason': 'Partial removal failure'
+                        })
+                        
+                except Exception as e:
+                    self._debug_log(f"Error removing connection from org {org.id}: {str(e)}")
+                    results['failed'].append({
+                        'org_id': org.id,
+                        'org_name': org.name,
+                        'connection_id': connection_id,
+                        'reason': str(e)
+                    })
+            else:
+                results['not_found'].append({
+                    'org_id': org.id,
+                    'org_name': org.name,
+                    'connection_id': connection_id,
+                    'status': 'Connection not found in this org'
+                })
+        
+        self._debug_log(f"Removal complete: {len(results['success'])} removed, {len(results['failed'])} failed, {len(results['not_found'])} not found")
+        return results
